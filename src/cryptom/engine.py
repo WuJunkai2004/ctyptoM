@@ -1,18 +1,24 @@
 import asyncio
+import inspect
 from datetime import datetime
 from time import time
 from typing import Any, Optional
 
-import ccxt as ccxt
+import ccxt.async_support as ccxt
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
 
 from .config import AppConfig, TaskConfig
 
 
+def _eval(expr, ctx=None):
+    return eval(expr, {}, ctx or {})
+
+
 class TaskEngine:
-    def __init__(self, config: TaskConfig):
+    def __init__(self, config: TaskConfig, engine: "CryptoEngine"):
         self.config = config
+        self.engine = engine
         self.name = config.name
 
         self.function_name = config.function
@@ -30,6 +36,7 @@ class TaskEngine:
         self.log = config.log
         self.script = config.action
 
+        self._is_executed: bool = False
         self._cache_value: Any = None
         self._cache_time: float = 0.0
         self._lock = asyncio.Lock()
@@ -46,10 +53,7 @@ class TaskEngine:
         if self.is_cache_valid:
             return self._cache_value
 
-        if self._is_running:
-            logger.warning(
-                f"Task {self.name} detected circular dependency, returning stale data."
-            )
+        if self._is_running and self._is_executed:
             return self._cache_value
 
         async with self._lock:
@@ -58,14 +62,13 @@ class TaskEngine:
             await self.execute()
             return self._cache_value
 
-    async def init(self, engine: "CryptoEngine"):
-        self.engine = engine
+    async def init(self):
         if not self.config.exchange:
             logger.warning(
                 f"Task {self.name} has no exchange specified; skipping function binding"
             )
             return
-        exchange_instance = engine.get_exchange(self.config.exchange)
+        exchange_instance = self.engine.get_exchange(self.config.exchange)
         if exchange_instance and self.function_name:
             self.function_obj = getattr(exchange_instance, self.function_name, None)
             if self.function_obj:
@@ -86,7 +89,7 @@ class TaskEngine:
         for expr in self.args:
             if isinstance(expr, str):
                 try:
-                    args.append(eval(expr))
+                    args.append(_eval(expr))
                 except Exception:
                     args.append(expr)
             else:
@@ -96,7 +99,7 @@ class TaskEngine:
         for k, v in self.kwargs.items():
             if isinstance(v, str):
                 try:
-                    kwargs[k] = eval(v)
+                    kwargs[k] = _eval(v)
                 except Exception:
                     kwargs[k] = v
             else:
@@ -109,11 +112,12 @@ class TaskEngine:
         try:
             await self._core_execute()
         finally:
+            self._is_executed = True
             self._is_running = False
 
     async def _core_execute(self):
         logger.info(f"Executing task: {self.name}")
-        # init context for eval
+        # init context for _eval
         context = {self.name: None}
 
         # load dependencies
@@ -127,23 +131,29 @@ class TaskEngine:
                 result = await self.function_obj(*args, **kwargs)
             else:
                 result = self.function_obj(*args, **kwargs)
+                if inspect.isawaitable(result):
+                    result = await result
         context[self.name] = result
 
         if self.return_expr:
             try:
-                result = eval(self.return_expr, {}, context)
+                result = _eval(self.return_expr, context)
+                if type(result) is str:
+                    result = _eval(result)
             except Exception as e:
-                logger.error(f"Task {self.name} return_expr evaluation error: {e}")
+                logger.error(f"Task {self.name} return_expr _evaluation error: {e}")
                 return
         context[self.name] = result
+        self._cache_time = time()
+        self._cache_value = result
 
         if self.condition:
             try:
-                if not eval(self.condition, {}, context):
+                if not _eval(self.condition, context):
                     return
                 if self.log:
                     try:
-                        logger.info("\n" + eval(f"f{repr(self.log)}", {}, context))
+                        logger.info("\n" + _eval(f"f{repr(self.log)}", context))
                     except Exception as e:
                         logger.error(f"Task {self.name} log format error: {e}")
                 if self.script:
@@ -175,17 +185,7 @@ class CryptoEngine:
                     continue
 
                 exchange_class = getattr(ccxt, exchange_id)
-                # 构造配置字典
-                conf = {
-                    "apiKey": ex_config.apiKey,
-                    "secret": ex_config.secret,
-                    "password": ex_config.password,
-                    "enableRateLimit": ex_config.enableRateLimit,
-                    "options": ex_config.options,
-                }
-                # 过滤掉 None 值
-                conf = {k: v for k, v in conf.items() if v is not None}
-
+                conf = ex_config.model_dump(exclude={"name"}, exclude_none=True)
                 exchange = exchange_class(conf)
                 self.exchanges[ex_config.name] = exchange
                 logger.info(f"Exchange initialized: {ex_config.name}")
@@ -194,8 +194,8 @@ class CryptoEngine:
 
     async def _init_tasks(self):
         for task_conf in self.config.tasks:
-            task_engine = TaskEngine(task_conf)
-            await task_engine.init(self)
+            task_engine = TaskEngine(task_conf, self)
+            await task_engine.init()
             self.tasks[task_conf.name] = task_engine
 
             if task_conf.interval:

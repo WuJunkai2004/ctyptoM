@@ -100,6 +100,13 @@ app.add_argument(
     default="INFO",
     help="Logging level (default: INFO)",
 )
+app.add_argument(
+    "-t",
+    "--ttl",
+    type=int,
+    default=60,
+    help="Time to live for cached data in seconds (default: 60)",
+)
 app.set_defaults(func=start)
 
 

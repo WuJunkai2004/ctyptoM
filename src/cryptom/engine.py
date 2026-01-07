@@ -1,6 +1,7 @@
 import asyncio
 import inspect
 from datetime import datetime
+from pathlib import Path
 from time import time
 from typing import Any, Optional
 
@@ -8,6 +9,7 @@ import ccxt.async_support as ccxt
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
 
+from .action import runAction
 from .config import AppConfig, TaskConfig
 
 
@@ -111,6 +113,10 @@ class TaskEngine:
         self._is_running = True
         try:
             await self._core_execute()
+        except ccxt.ExchangeNotAvailable:
+            logger.error(
+                f"Exchange not available for task {self.name} with exchange {self.config.exchange}"
+            )
         finally:
             self._is_executed = True
             self._is_running = False
@@ -157,8 +163,21 @@ class TaskEngine:
                     except Exception as e:
                         logger.error(f"Task {self.name} log format error: {e}")
                 if self.script:
-                    # @TODO: 执行外部脚本
-                    logger.info(f"Triggering action: {self.script}")
+                    script = self.script.strip()
+                    if not script.lower().endswith(".py"):
+                        script += ".py"
+                    script_path = Path(script)
+                    if not script_path.is_absolute():
+                        # 假设有个默认存放脚本的目录，或者直接用 root 目录
+                        script_path = Path(".") / script_path
+                    current_exchange = None
+                    if self.config.exchange:
+                        current_exchange = self.engine.get_exchange(
+                            self.config.exchange
+                        )
+                    await asyncio.to_thread(
+                        runAction, str(script_path), current_exchange, context
+                    )
             except Exception as e:
                 logger.error(f"Task {self.name} condition check error: {e}")
 

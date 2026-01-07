@@ -1,0 +1,26 @@
+[project]
+name = "cryptom"
+version = "0.1.0"
+description = "A powerful crypto monitoring tool"
+readme = "README.md"
+authors = [
+    { name = "Wu Junkai", email = "wu.junkai@qq.com" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "aiohttp>=3.13.3",
+    "apscheduler>=3.11.2",
+    "ccxt>=4.5.31",
+    "fastapi>=0.128.0",
+    "loguru>=0.7.3",
+    "pydantic>=2.12.5",
+    "pyyaml>=6.0.3",
+    "uvicorn>=0.40.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.11,<0.10.0"]
+build-backend = "uv_build"
+
+[project.scripts]
+cryptom = "cryptom:main"

@@ -30,6 +30,34 @@ class TaskEngine:
         self.log = config.log
         self.script = config.action
 
+        self._cache_value: Any = None
+        self._cache_time: float = 0.0
+        self._lock = asyncio.Lock()
+        self._is_running: bool = False
+        self._ttl: int = getattr(config, "interval", 0) or 5
+
+    @property
+    def is_cache_valid(self):
+        if self._cache_value is None:
+            return False
+        return (time() - self._cache_time) < self._ttl
+
+    async def get_result(self):
+        if self.is_cache_valid:
+            return self._cache_value
+
+        if self._is_running:
+            logger.warning(
+                f"Task {self.name} detected circular dependency, returning stale data."
+            )
+            return self._cache_value
+
+        async with self._lock:
+            if self.is_cache_valid:
+                return self._cache_value
+            await self.execute()
+            return self._cache_value
+
     async def init(self, engine: "CryptoEngine"):
         self.engine = engine
         if not self.config.exchange:
@@ -77,6 +105,13 @@ class TaskEngine:
         return args, kwargs
 
     async def execute(self):
+        self._is_running = True
+        try:
+            await self._core_execute()
+        finally:
+            self._is_running = False
+
+    async def _core_execute(self):
         logger.info(f"Executing task: {self.name}")
         # init context for eval
         context = {self.name: None}
@@ -102,8 +137,6 @@ class TaskEngine:
                 return
         context[self.name] = result
 
-        self.engine.update_data(self.name, result)
-
         if self.condition:
             try:
                 if not eval(self.condition, {}, context):
@@ -120,32 +153,12 @@ class TaskEngine:
                 logger.error(f"Task {self.name} condition check error: {e}")
 
 
-class DataCache:
-    def __init__(self):
-        self.data = None
-        self.update_time = None
-
-    def update(self, data: Any):
-        self.data = data
-        self.update_time = time()
-
-    def get(self) -> Optional[Any]:
-        if self.update_time and time() - self.update_time < 5:
-            return self.data
-        else:
-            return None
-
-    def get_force(self) -> Any:
-        return self.data
-
-
 class CryptoEngine:
     def __init__(self, config: AppConfig):
         self.config = config
         self.scheduler = AsyncIOScheduler()
         self.exchanges: dict[str, ccxt.Exchange] = {}
         self.tasks: dict[str, TaskEngine] = {}
-        self.data_store: dict[str, DataCache] = {}  # 存储任务结果
 
     async def init(self):
         """初始化所有资源"""
@@ -202,26 +215,11 @@ class CryptoEngine:
         return self.exchanges.get(name)
 
     async def get_data(self, key: str) -> Any:
-        cache_obj = self.data_store.get(key, DataCache())
-        cache = cache_obj.get()
-        if cache is not None:
-            return cache
         task = self.tasks.get(key)
         if not task:
-            logger.error(f"Data for key {key} not found and no associated task")
+            logger.error(f"Task {key} not found")
             return None
-        # if task is running, maybe it is in a deadlock, so we cannot execute it again
-        # just get the data from cache, Do not care the result
-        if task is asyncio.current_task():
-            logger.warning(f"Task {key} is already running; returning cached data")
-            return cache_obj.get_force()
-        await task.execute()
-        return self.data_store.get(key, DataCache()).get()
-
-    def update_data(self, key: str, value: Any):
-        if key not in self.data_store:
-            self.data_store[key] = DataCache()
-        self.data_store[key].update(value)
+        return await task.get_result()
 
     async def start(self):
         logger.info("Starting CryptoEngine...")

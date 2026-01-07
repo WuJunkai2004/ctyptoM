@@ -17,18 +17,16 @@ class _ExchangeConfig(BaseModel):
 
 
 # --- 2. 任务配置 ---
-class _TaskConfig(BaseModel):
+class TaskConfig(BaseModel):
     name: str
 
     # --- 数据获取类任务字段 ---
     exchange: Optional[str] = None
     function: Optional[str] = None
 
-    # 灵活的参数处理
     # 允许 YAML 里写 params: "BTC/USDT" (简写) 或 args: [...]
     args: List[Any] = Field(default_factory=list)
     kwargs: Dict[str, Any] = Field(default_factory=dict)
-
     # 兼容旧写法 params，自动转为 args
     params: Optional[Union[str, List[Any]]] = Field(None, exclude=True)
 
@@ -37,13 +35,13 @@ class _TaskConfig(BaseModel):
     interval: Optional[int] = None  # 如果依赖任务是被动触发，这里可以为空
 
     # --- 表达式与后续动作 ---
-    # condition: Python 表达式字符串，返回 Bool
-    condition: Optional[str] = None
     # return_expr: Python 表达式字符串，用于提取或计算结果
     return_expr: Optional[str] = Field(None, alias="return")
-    # log: 格式化字符串
+    # condition: Python 表达式字符串，返回 Bool
+    condition: Optional[str] = None
+    # log: 格式化字符串, 当 condition 为 True 时记录日志
     log: Optional[str] = None
-    # action: 触发脚本路径
+    # action: 触发脚本路径, 当 condition 为 True 时执行
     action: Optional[str] = None
 
     @model_validator(mode="before")
@@ -78,7 +76,7 @@ class _GraphConfig(BaseModel):
 class AppConfig(BaseModel):
     port: int = 16888
     exchanges: List[_ExchangeConfig]
-    tasks: List[_TaskConfig]
+    tasks: List[TaskConfig]
     graphs: List[_GraphConfig] = Field(default_factory=list)
 
     @classmethod

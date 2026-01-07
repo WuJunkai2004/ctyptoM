@@ -1,26 +1,110 @@
 # src/cryptom/__main__.py
 import argparse
+import asyncio
+import signal
+from pathlib import Path
+
 from loguru import logger
 
-def start(config: str = "config.yaml"):
-    """
-    启动监控服务
-    """
-    logger.info(f"正在加载配置文件: {config}")
-    logger.info("系统启动中...")
-    # 这里未来会调用你的 Engine 和 Server
-    # from .engine import run_engine
-    # run_engine(config)
+from .config import AppConfig
+from .engine import CryptoEngine
 
 
-app = argparse.ArgumentParser(description="CryptoM 监控服务")
+async def _shutdown(signal_name, loop, engine: CryptoEngine):
+    """
+    Handle shutdown signals.
+    """
+    logger.info(f"Received signal {signal_name}, shutting down...")
+    await engine.stop()
+    for task in asyncio.all_tasks():
+        if task is not asyncio.current_task():
+            task.cancel()
+        else:
+            await task
+    logger.info("Canceling outstanding tasks...")
+    loop.stop()
+
+
+async def _start_async(config: AppConfig):
+    engine = CryptoEngine(config)
+
+    # Setup signal handlers
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(
+                sig, lambda s=sig: asyncio.create_task(_shutdown(s.name, loop, engine))
+            )
+        except NotImplementedError:
+            # Windows implementation of asyncio loop usually doesn't support add_signal_handler
+            # We can handle KeyboardInterrupt in the main block instead
+            pass
+
+    try:
+        await engine.start()
+        logger.info("System started. Press Ctrl+C to exit.")
+
+        # Keep the process alive
+        stop_event = asyncio.Event()
+        # If on Windows, we might need a way to capture signals if add_signal_handler fails
+        # Or just rely on the try/except KeyboardInterrupt in the synchronous wrapper if we weren't inside asyncio.run
+        # But since we are here, we can just wait.
+
+        # On Windows, standard asyncio loop (ProactorEventLoop) does not support add_signal_handler.
+        # So we use a simple sleep loop to check for interruption if needed,
+        # or rely on the fact that Ctrl+C raises KeyboardInterrupt in the main thread
+        # which asyncio.run propagates.
+
+        while True:
+            await asyncio.sleep(1)
+
+    except asyncio.CancelledError:
+        logger.info("Main task cancelled")
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+    finally:
+        await engine.stop()
+
+
+def start(config_str: str = "config.yaml"):
+    """
+    start the CryptoM monitoring service.
+    """
+    # Load configuration
+    logger.info(f"Loading config file: {config_str}")
+    config_path = Path(config_str)
+    if not config_path.exists():
+        logger.error(f"cannot find config file: {config_path.absolute()}")
+        return
+    config = AppConfig.load(config_path)
+    logger.info("Config file loaded successfully.")
+
+    # Start the async engine
+    logger.info("Starting CryptoM service...")
+    try:
+        asyncio.run(_start_async(config))
+    except KeyboardInterrupt:
+        # This catches Ctrl+C on Windows when add_signal_handler is not available
+        logger.info("Received KeyboardInterrupt, shutting down...")
+        # Cleanup is handled in _start_async's finally block or engine.stop() calling if we had the instance.
+        # Since asyncio.run finishes, we can't easily access the engine instance here
+        # unless we structured it differently.
+        # But _start_async has a finally block that calls engine.stop().
+        # Wait, if KeyboardInterrupt hits `asyncio.run`, the loop inside cancels.
+        # The `finally` block in `_start_async` will be executed.
+        pass
+
+
+app = argparse.ArgumentParser(description="CryptoM service command line interface")
 app.add_argument(
-    "-c", "--config",
+    "-c",
+    "--config",
     type=str,
     default="config.yaml",
-    help="配置文件路径，默认为 config.yaml",
+    help="Path to the configuration file (default: config.yaml)",
 )
 app.set_defaults(func=start)
+
 
 def main():
     args = app.parse_args()

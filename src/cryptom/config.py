@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, model_validator
 
 # --- 1. 交易所配置 ---
 class _ExchangeConfig(BaseModel):
+    model_config = {"extra": "allow"}
     name: str
     apiKey: Optional[str] = None
     secret: Optional[str] = None

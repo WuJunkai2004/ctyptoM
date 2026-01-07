@@ -43,9 +43,7 @@ async def _start_async(config: AppConfig):
     try:
         await engine.start()
         logger.info("System started. Press Ctrl+C to exit.")
-
-        # Keep the process alive
-        stop_event = asyncio.Event()
+        asyncio.Event()
         # If on Windows, we might need a way to capture signals if add_signal_handler fails
         # Or just rely on the try/except KeyboardInterrupt in the synchronous wrapper if we weren't inside asyncio.run
         # But since we are here, we can just wait.
@@ -54,7 +52,6 @@ async def _start_async(config: AppConfig):
         # So we use a simple sleep loop to check for interruption if needed,
         # or rely on the fact that Ctrl+C raises KeyboardInterrupt in the main thread
         # which asyncio.run propagates.
-
         while True:
             await asyncio.sleep(1)
 
@@ -86,13 +83,6 @@ def start(config_str: str = "config.yaml"):
     except KeyboardInterrupt:
         # This catches Ctrl+C on Windows when add_signal_handler is not available
         logger.info("Received KeyboardInterrupt, shutting down...")
-        # Cleanup is handled in _start_async's finally block or engine.stop() calling if we had the instance.
-        # Since asyncio.run finishes, we can't easily access the engine instance here
-        # unless we structured it differently.
-        # But _start_async has a finally block that calls engine.stop().
-        # Wait, if KeyboardInterrupt hits `asyncio.run`, the loop inside cancels.
-        # The `finally` block in `_start_async` will be executed.
-        pass
 
 
 app = argparse.ArgumentParser(description="CryptoM service command line interface")

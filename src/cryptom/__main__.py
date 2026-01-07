@@ -93,6 +93,13 @@ app.add_argument(
     default="config.yaml",
     help="Path to the configuration file (default: config.yaml)",
 )
+app.add_argument(
+    "-l",
+    "--log-level",
+    type=str,
+    default="INFO",
+    help="Logging level (default: INFO)",
+)
 app.set_defaults(func=start)
 
 

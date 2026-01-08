@@ -1,6 +1,6 @@
 import inspect
 import os
-from typing import Any, Dict
+from typing import Any, Literal
 
 from loguru import logger
 
@@ -20,12 +20,30 @@ except ImportError:
         return m
 
 
+def log_print(
+    *values: object,
+    sep: str | None = " ",
+    end: str | None = "\n",
+    file: Any = None,
+    flush: Literal[False] = False,
+):
+    if file is not None:
+        print(*values, sep=sep, end=end, file=file, flush=flush)
+    else:
+        if sep is None:
+            sep = " "
+        if end is None:
+            end = "\n"
+        message = sep.join(str(v) for v in values) + end
+        logger.info(message)
+
+
 class register:
     def __init__(self, func):
         self.func = func
         self.func_args_names = inspect.getfullargspec(func).args
         self.func.__globals__["cryptom_action_handler"] = self
-        self.func.__globals__["print"] = logger.info
+        self.func.__globals__["print"] = log_print
 
     def action(self, exchange, context):
         available_content = {
@@ -51,14 +69,13 @@ class ActionCache:
 
     def __init__(self):
         # 结构: { "path": {"mtime": float, "module": module_obj} }
-        self._cache: Dict[str, Dict[str, Any]] = {}
+        self._cache: dict[str, dict[str, Any]] = {}
 
     def get_module(self, path: str):
         if not os.path.exists(path):
             raise FileNotFoundError(f"Script not found: {path}")
 
         current_mtime = os.path.getmtime(path)
-
         # 检查缓存是否存在且未过期
         if path in self._cache:
             cached = self._cache[path]

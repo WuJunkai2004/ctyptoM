@@ -3,7 +3,6 @@ import inspect
 from datetime import datetime
 from pathlib import Path
 from time import time
-from typing import Any, Optional
 
 import ccxt.async_support as ccxt
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -39,7 +38,7 @@ class TaskEngine:
         self.script = config.action
 
         self._is_executed: bool = False
-        self._cache_value: Any = None
+        self._cache_value: object = None
         self._cache_time: float = 0.0
         self._lock = asyncio.Lock()
         self._is_running: bool = False
@@ -124,7 +123,7 @@ class TaskEngine:
     async def _core_execute(self):
         logger.info(f"Executing task: {self.name}")
         # init context for _eval
-        context = {self.name: None}
+        context = {"last": self._cache_value}
 
         # load dependencies
         for dep in self.dependencies:
@@ -140,6 +139,7 @@ class TaskEngine:
                 if inspect.isawaitable(result):
                     result = await result
         context[self.name] = result
+        context["this"] = result
 
         if self.return_expr:
             try:
@@ -150,36 +150,34 @@ class TaskEngine:
                 logger.error(f"Task {self.name} return_expr _evaluation error: {e}")
                 return
         context[self.name] = result
+        context["this"] = result
         self._cache_time = time()
         self._cache_value = result
 
-        if self.condition:
-            try:
-                if not _eval(self.condition, context):
-                    return
-                if self.log:
-                    try:
-                        logger.info("\n" + _eval(f"f{repr(self.log)}", context))
-                    except Exception as e:
-                        logger.error(f"Task {self.name} log format error: {e}")
-                if self.script:
-                    script = self.script.strip()
-                    if not script.lower().endswith(".py"):
-                        script += ".py"
-                    script_path = Path(script)
-                    if not script_path.is_absolute():
-                        # 假设有个默认存放脚本的目录，或者直接用 root 目录
-                        script_path = Path(".") / script_path
-                    current_exchange = None
-                    if self.config.exchange:
-                        current_exchange = self.engine.get_exchange(
-                            self.config.exchange
-                        )
-                    await asyncio.to_thread(
-                        runAction, str(script_path), current_exchange, context
-                    )
-            except Exception as e:
-                logger.error(f"Task {self.name} condition check error: {e}")
+        try:
+            if not _eval(self.condition, context):
+                return
+            if self.log:
+                try:
+                    logger.info("\n" + _eval(f"f{repr(self.log)}", context))
+                except Exception as e:
+                    logger.error(f"Task {self.name} log format error: {e}")
+            if self.script:
+                script = self.script.strip()
+                if not script.lower().endswith(".py"):
+                    script += ".py"
+                script_path = Path(script)
+                if not script_path.is_absolute():
+                    # 假设有个默认存放脚本的目录，或者直接用 root 目录
+                    script_path = Path(".") / script_path
+                current_exchange = None
+                if self.config.exchange:
+                    current_exchange = self.engine.get_exchange(self.config.exchange)
+                await asyncio.to_thread(
+                    runAction, str(script_path), current_exchange, context
+                )
+        except Exception as e:
+            logger.error(f"Task {self.name} condition check error: {e}")
 
 
 class CryptoEngine:
@@ -230,10 +228,10 @@ class CryptoEngine:
                     f"Task scheduled: {task_conf.name} (every {task_conf.interval}s)"
                 )
 
-    def get_exchange(self, name: str) -> Optional[ccxt.Exchange]:
+    def get_exchange(self, name: str) -> ccxt.Exchange | None:
         return self.exchanges.get(name)
 
-    async def get_data(self, key: str) -> Any:
+    async def get_data(self, key: str) -> object:
         task = self.tasks.get(key)
         if not task:
             logger.error(f"Task {key} not found")

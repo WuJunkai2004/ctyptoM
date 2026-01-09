@@ -5,7 +5,7 @@ import yaml
 from pydantic import BaseModel, Field, model_validator
 
 
-# --- 1. 交易所配置 ---
+# --- 交易所配置 ---
 class _ExchangeConfig(BaseModel):
     model_config = {"extra": "allow"}
     name: str
@@ -17,7 +17,7 @@ class _ExchangeConfig(BaseModel):
     options: Dict[str, Any] = Field(default_factory=dict)
 
 
-# --- 2. 任务配置 ---
+# --- 任务配置 ---
 class TaskConfig(BaseModel):
     name: str
 
@@ -63,7 +63,7 @@ class TaskConfig(BaseModel):
         return values
 
 
-# --- 3. 图表配置 (暂时预留) ---
+# --- 图表配置 (暂时预留) ---
 class _GraphConfig(BaseModel):
     name: str
     type: str
@@ -73,12 +73,26 @@ class _GraphConfig(BaseModel):
     description: Optional[str] = None
 
 
-# --- 4. 根配置 ---
+# --- 数据库配置 ---
+class DatabaseConfig(BaseModel):
+    # 默认使用 sqlite
+    provider: str = "sqlite"
+    # 数据库文件名
+    database: str = "datas.db"
+    # 预留给 postgresql/mysql 的配置
+    host: Optional[str] = None
+    port: Optional[int] = None
+    user: Optional[str] = None
+    password: Optional[str] = None
+
+
+# --- 根配置 ---
 class AppConfig(BaseModel):
     port: int = 16888
     exchanges: List[_ExchangeConfig]
     tasks: List[TaskConfig]
     graphs: List[_GraphConfig] = Field(default_factory=list)
+    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
 
     @classmethod
     def load(cls, path: Path) -> "AppConfig":

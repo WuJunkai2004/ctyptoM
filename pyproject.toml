@@ -13,6 +13,7 @@ dependencies = [
     "ccxt>=4.5.31",
     "fastapi>=0.128.0",
     "loguru>=0.7.3",
+    "peewee>=3.19.0",
     "pydantic>=2.12.5",
     "pyyaml>=6.0.3",
     "uvicorn>=0.40.0",

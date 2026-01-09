@@ -10,6 +10,7 @@ from loguru import logger
 
 from .action import runAction
 from .config import AppConfig, TaskConfig
+from .stored import initDatabase, saveTaskResult
 
 
 def _eval(expr, ctx=None):
@@ -43,6 +44,12 @@ class TaskEngine:
         self._lock = asyncio.Lock()
         self._is_running: bool = False
         self._ttl: int = getattr(config, "interval", 0) or 5
+
+        self.synoposis = {
+            "exchange": config.exchange,
+            "symbol": self.args[0] if len(self.args) else "unknown",
+            "function": self.function_name,
+        }
 
     @property
     def is_cache_valid(self):
@@ -122,13 +129,14 @@ class TaskEngine:
 
     async def _core_execute(self):
         logger.info(f"Executing task: {self.name}")
-        # init context for _eval
+        # init context for eval
         context = {"last": self._cache_value}
 
         # load dependencies
         for dep in self.dependencies:
             context[dep] = await self.engine.get_data(dep)
 
+        # execute function to fetch result
         result = None
         if self.function_obj:
             args, kwargs = self._prepare_params()
@@ -141,6 +149,7 @@ class TaskEngine:
         context[self.name] = result
         context["this"] = result
 
+        # if return_expr exists, re-evaluate result
         if self.return_expr:
             try:
                 result = _eval(self.return_expr, context)
@@ -151,8 +160,10 @@ class TaskEngine:
                 return
         context[self.name] = result
         context["this"] = result
+
         self._cache_time = time()
         self._cache_value = result
+        saveTaskResult(self.name, result, self._cache_time, self.synoposis)
 
         try:
             if not _eval(self.condition, context):
@@ -168,7 +179,6 @@ class TaskEngine:
                     script += ".py"
                 script_path = Path(script)
                 if not script_path.is_absolute():
-                    # 假设有个默认存放脚本的目录，或者直接用 root 目录
                     script_path = Path(".") / script_path
                 current_exchange = None
                 if self.config.exchange:
@@ -189,6 +199,7 @@ class CryptoEngine:
 
     async def init(self):
         """初始化所有资源"""
+        initDatabase(self.config.database)
         await self._init_exchanges()
         await self._init_tasks()
 

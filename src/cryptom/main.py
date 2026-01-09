@@ -2,6 +2,7 @@
 import argparse
 import asyncio
 import signal
+import sys
 from pathlib import Path
 
 from loguru import logger
@@ -67,6 +68,13 @@ def start(config_str: str = "config.yaml"):
     """
     start the CryptoM monitoring service.
     """
+    # Configure logging format
+    logger.remove()
+    logger.add(
+        sys.stderr,
+        format="<green>{time:MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan> - <level>{message}</level>",
+    )
+
     # Load configuration
     logger.info(f"Loading config file: {config_str}")
     config_path = Path(config_str)

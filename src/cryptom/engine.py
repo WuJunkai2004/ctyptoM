@@ -191,14 +191,15 @@ class TaskEngine:
 
 
 class CryptoEngine:
-    def __init__(self, config: AppConfig):
-        self.config = config
+    def __init__(self):
+        self.config = None
         self.scheduler = AsyncIOScheduler()
         self.exchanges: dict[str, ccxt.Exchange] = {}
         self.tasks: dict[str, TaskEngine] = {}
 
-    async def init(self):
+    async def init(self, config: AppConfig):
         """初始化所有资源"""
+        self.config = config
         initDatabase(self.config.database)
         await self._init_exchanges()
         await self._init_tasks()

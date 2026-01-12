@@ -173,3 +173,44 @@ def saveTaskResult(
 
     except Exception as e:
         logger.error(f"Failed to save DB record for {task_name}: {e}")
+
+
+def fetchGraphData(
+    task_names: list[str], start_time: float, end_time: float
+) -> dict[str, list[dict]]:
+    """
+    获取指定任务列表在时间范围内的数据
+    Returns:
+        {
+            "task_name1": [{"time": ts, "value": val}, ...],
+            "task_name2": [...]
+        }
+    """
+    start_dt = datetime.fromtimestamp(start_time)
+    end_dt = datetime.fromtimestamp(end_time)
+
+    # 联表查询：TaskRecord -> TaskMeta
+    query = (
+        TaskRecord.select(TaskRecord.timestamp, TaskRecord.value_num, TaskMeta.name)
+        .join(TaskMeta)
+        .where(
+            (TaskMeta.name << task_names)
+            & (TaskRecord.timestamp >= start_dt)
+            & (TaskRecord.timestamp <= end_dt)
+            & (TaskRecord.value_num.is_null(False))
+        )
+        .dicts()
+    )
+
+    result = {name: [] for name in task_names}
+
+    for row in query:
+        name = row["name"]
+        if name in result:
+            result[name].append(
+                {
+                    "time": row["timestamp"].timestamp(),  # 转回时间戳方便前端处理
+                    "value": row["value_num"],
+                }
+            )
+    return result

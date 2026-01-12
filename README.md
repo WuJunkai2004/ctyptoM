@@ -213,3 +213,8 @@ options:
 ## License
 
 MIT
+
+## TODO
+- [ ] 修复数据库操作阻塞
+- [ ] 在初始化时，检验是否存在循环依赖
+- [ ] 在 CryptoEngine.init 方法中，应该每次都重新实例化 AsyncIOScheduler

@@ -67,7 +67,7 @@ class TaskEngine:
         async with self._lock:
             if self.is_cache_valid:
                 return self._cache_value
-            await self.execute()
+            await self._locked_execute()
             return self._cache_value
 
     async def init(self):
@@ -116,6 +116,13 @@ class TaskEngine:
         return args, kwargs
 
     async def execute(self):
+        if self._is_running:
+            logger.info(f"Task {self.name} skipped (already running).")
+            return
+        async with self._lock:
+            await self._locked_execute()
+
+    async def _locked_execute(self):
         self._is_running = True
         try:
             await self._core_execute()
@@ -191,15 +198,14 @@ class TaskEngine:
 
 
 class CryptoEngine:
-    def __init__(self):
-        self.config = None
+    def __init__(self, config: AppConfig):
+        self.config = config
         self.scheduler = AsyncIOScheduler()
         self.exchanges: dict[str, ccxt.Exchange] = {}
         self.tasks: dict[str, TaskEngine] = {}
 
-    async def init(self, config: AppConfig):
+    async def init(self):
         """初始化所有资源"""
-        self.config = config
         initDatabase(self.config.database)
         await self._init_exchanges()
         await self._init_tasks()
@@ -222,6 +228,7 @@ class CryptoEngine:
                 logger.error(f"Failed to initialize exchange {ex_config.name}: {e}")
 
     async def _init_tasks(self):
+        self.scheduler = AsyncIOScheduler()
         for task_conf in self.config.tasks:
             task_engine = TaskEngine(task_conf, self)
             await task_engine.init()
